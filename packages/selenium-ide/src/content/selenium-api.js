@@ -1041,9 +1041,10 @@ function getClientXY(element, coordString) {
 
   // Get position of element,
   // Return 2 item array with clientX and clientY
+  const rect = element.getBoundingClientRect()
   return [
-    Selenium.prototype.getElementPositionLeft(element) + x,
-    Selenium.prototype.getElementPositionTop(element) + y,
+    rect.x + x,
+    rect.y + y,
   ]
 }
 
@@ -2663,35 +2664,23 @@ Selenium.prototype.doDragAndDropToObject = function(
    * @param locatorOfObjectToBeDragged an element to be dragged
    * @param locatorOfDragDestinationObject an element whose location (i.e., whose center-most pixel) will be the point where locatorOfObjectToBeDragged  is dropped
    */
-  if (!this.browserbot.findElement(locatorOfObjectToBeDragged).draggable) {
-    //origin code
-    let startX = this.getElementPositionLeft(locatorOfObjectToBeDragged)
-    let startY = this.getElementPositionTop(locatorOfObjectToBeDragged)
+   const drag = this.browserbot.findElement(locatorOfObjectToBeDragged)
+   const drop = this.browserbot.findElement(locatorOfDragDestinationObject)
+   if (!drag.draggable) {
+    const dragXY = drag.getBoundingClientRect()
+    const dropXY = drop.getBoundingClientRect()
 
-    let destinationLeftX = this.getElementPositionLeft(
-      locatorOfDragDestinationObject
-    )
-    let destinationTopY = this.getElementPositionTop(
-      locatorOfDragDestinationObject
-    )
-    let destinationWidth = this.getElementWidth(locatorOfDragDestinationObject)
-    let destinationHeight = this.getElementHeight(
-      locatorOfDragDestinationObject
-    )
+    let endX = Math.round(dropXY.x + dropXY.width / 2)
+    let endY = Math.round(dropXY.y + dropXY.height / 2)
 
-    let endX = Math.round(destinationLeftX + destinationWidth / 2)
-    let endY = Math.round(destinationTopY + destinationHeight / 2)
-
-    let deltaX = endX - startX
-    let deltaY = endY - startY
+    let deltaX = endX - dragXY.x
+    let deltaY = endY - dragXY.y
 
     let movementsString = '' + deltaX + ',' + deltaY
     this.doDragAndDrop(locatorOfObjectToBeDragged, movementsString)
   } else {
     //DragAndDropExt, Shuo-Heng Shih, SELAB, CSIE, NCKU, 2016/09/29
-    let element = this.browserbot.findElement(locatorOfObjectToBeDragged)
-    let target = this.browserbot.findElement(locatorOfDragDestinationObject)
-    this.browserbot.triggerDragEvent(element, target)
+    this.browserbot.triggerDragEvent(drag, drop)
   }
 }
 
@@ -2806,124 +2795,6 @@ Selenium.prototype._isCommentOrEmptyTextNode = function(node) {
   return (
     node.nodeType == 8 || (node.nodeType == 3 && !/[^\t\n\r ]/.test(node.data))
   )
-}
-
-Selenium.prototype.getElementPositionLeft = function(locator) {
-  /**
-   * Retrieves the horizontal position of an element
-   *
-   * @param locator an <a href="#locators">element locator</a> pointing to an element OR an element itself
-   * @return number of pixels from the edge of the frame.
-   */
-  let element
-  if ('string' == typeof locator) {
-    element = this.browserbot.findElement(locator)
-  } else {
-    element = locator
-  }
-  let x = element.offsetLeft
-  let elementParent = element.offsetParent
-
-  while (elementParent != null) {
-    if (document.all) {
-      if (elementParent.tagName != 'TABLE' && elementParent.tagName != 'BODY') {
-        x += elementParent.clientLeft
-      }
-    } // Netscape/DOM
-    else {
-      if (elementParent.tagName == 'TABLE') {
-        let parentBorder = parseInt(elementParent.border)
-        if (isNaN(parentBorder)) {
-          let parentFrame = elementParent.getAttribute('frame')
-          if (parentFrame != null) {
-            x += 1
-          }
-        } else if (parentBorder > 0) {
-          x += parentBorder
-        }
-      }
-    }
-    x += elementParent.offsetLeft
-    elementParent = elementParent.offsetParent
-  }
-  return x
-}
-
-Selenium.prototype.getElementPositionTop = function(locator) {
-  /**
-   * Retrieves the vertical position of an element
-   *
-   * @param locator an <a href="#locators">element locator</a> pointing to an element OR an element itself
-   * @return number of pixels from the edge of the frame.
-   */
-  let element
-  if ('string' == typeof locator) {
-    element = this.browserbot.findElement(locator)
-  } else {
-    element = locator
-  }
-
-  let y = 0
-
-  while (element != null) {
-    if (document.all) {
-      if (element.tagName != 'TABLE' && element.tagName != 'BODY') {
-        y += element.clientTop
-      }
-    } // Netscape/DOM
-    else {
-      if (element.tagName == 'TABLE') {
-        let parentBorder = parseInt(element.border)
-        if (isNaN(parentBorder)) {
-          let parentFrame = element.getAttribute('frame')
-          if (parentFrame != null) {
-            y += 1
-          }
-        } else if (parentBorder > 0) {
-          y += parentBorder
-        }
-      }
-    }
-    y += element.offsetTop
-
-    // Netscape can get confused in some cases, such that the height of the parent is smaller
-    // than that of the element (which it shouldn't really be). If this is the case, we need to
-    // exclude this element, since it will result in too large a 'top' return value.
-    if (
-      element.offsetParent &&
-      element.offsetParent.offsetHeight &&
-      element.offsetParent.offsetHeight < element.offsetHeight
-    ) {
-      // skip the parent that's too small
-      element = element.offsetParent.offsetParent
-    } else {
-      // Next up...
-      element = element.offsetParent
-    }
-  }
-  return y
-}
-
-Selenium.prototype.getElementWidth = function(locator) {
-  /**
-   * Retrieves the width of an element
-   *
-   * @param locator an <a href="#locators">element locator</a> pointing to an element
-   * @return number width of an element in pixels
-   */
-  let element = this.browserbot.findElement(locator)
-  return element.offsetWidth
-}
-
-Selenium.prototype.getElementHeight = function(locator) {
-  /**
-   * Retrieves the height of an element
-   *
-   * @param locator an <a href="#locators">element locator</a> pointing to an element
-   * @return number height of an element in pixels
-   */
-  let element = this.browserbot.findElement(locator)
-  return element.offsetHeight
 }
 
 Selenium.prototype.getCursorPosition = function(locator) {
