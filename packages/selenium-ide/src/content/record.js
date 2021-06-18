@@ -600,8 +600,8 @@ Recorder.addEventHandler(
   'contextmenu',
   function(event) {
     let myPort = browser.runtime.connect()
-    let tmpTarget = locatorBuilders.buildAll(event.target)
     myPort.onMessage.addListener(function(m) {
+      const tmpTarget = locatorBuilders.buildAll(event.target, m.cmd)
       if (m.cmd.includes('Text') || m.cmd.includes('Label')) {
         let tmpText = bot.dom.getVisibleText(event.target)
         record(m.cmd, tmpTarget, tmpText)
