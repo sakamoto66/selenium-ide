@@ -114,13 +114,19 @@ Recorder.addEventHandler(
       !this.recordingState.preventClick &&
       eventIsTrusted(event)
     ) {
-      if (!this.recordingState.preventClickTwice) {
-        record('click', locatorBuilders.buildAll(event.target), '')
-        this.recordingState.preventClickTwice = true
-      }
+      this.recordingState.preventClickTwice = false
       setTimeout(() => {
-        this.recordingState.preventClickTwice = false
-      }, 30)
+        if(this.recordingState.preventClickTwice) {
+          return;
+        }
+        if(event.altKey) {
+          const rect = event.target.getBoundingClientRect()
+          const xy = [event.clientX-rect.x, event.clientY-rect.y]
+          record('clickAt', locatorBuilders.buildAll(event.target), xy.join(','))
+        } else {
+          record('click', locatorBuilders.buildAll(event.target), '')
+        }
+      }, 200)
     }
   },
   true
@@ -132,7 +138,14 @@ Recorder.addEventHandler(
   'doubleClickAt',
   'dblclick',
   function(event) {
-    record('doubleClick', locatorBuilders.buildAll(event.target), '')
+    this.recordingState.preventClickTwice = true
+    if(event.altKey) {
+      const rect = event.target.getBoundingClientRect()
+      const xy = [event.clientX-rect.x, event.clientY-rect.y]
+      record('doubleClickAt', locatorBuilders.buildAll(event.target), xy.join(','))
+    } else {
+      record('doubleClick', locatorBuilders.buildAll(event.target), '')
+    }
   },
   true
 )
@@ -226,10 +239,7 @@ Recorder.addEventHandler(
               )
             }
           }
-          this.recordingState.preventClick = true
-          setTimeout(() => {
-            this.recordingState.preventClick = false
-          }, 500)
+          skipClick.call(this)
           setTimeout(() => {
             if (this.recordingState.enterValue != event.target.value)
               this.recordingState.enterTarget = null
@@ -289,28 +299,70 @@ Recorder.addEventHandler(
 )
 // END
 
-let mousedown, mouseup, selectMouseup, selectMousedown, mouseoverQ, clickLocator
+let mouseoverQ = [], mousedownLastTime = 0
+
+const resetMouseoverQ = function() {
+  mouseoverQ = []
+}
+const addMouseoverQ = function(event) {
+  const curr = (new Date()).getTime()
+  const rect = event.target.getBoundingClientRect()
+  const xy = [event.clientX-rect.x, event.clientY-rect.y]
+  if(0==mouseoverQ.length) {
+    if('mousedown' != event.type) {
+      return
+    }
+  } else {
+    const last = mouseoverQ[mouseoverQ.length-1];
+    const dx = Math.abs(last[2][0] - xy[0])
+    const dy = Math.abs(last[2][1] - xy[1])
+    if(last[0].type == event.type && last[0].target === event.target) {
+      if(dx < 5 && dy < 5) {
+        return
+      }
+      if(curr < last[1]+50) {
+        return
+      }
+    }
+  }
+  mouseoverQ.push([event, curr, xy])
+}
+
+function skipClick(){
+  this.recordingState.preventClick = true
+  setTimeout(() => {
+    this.recordingState.preventClick = false
+  }, 500)
+}
+
+function getSelectionText() {
+  let text = ''
+  let activeEl = window.document.activeElement
+  let activeElTagName = activeEl ? activeEl.tagName.toLowerCase() : null
+  if (activeElTagName == 'textarea' || activeElTagName == 'input') {
+    text = activeEl.value.slice(
+      activeEl.selectionStart,
+      activeEl.selectionEnd
+    )
+  } else if (window.getSelection) {
+    text = window.getSelection().toString()
+  }
+  return text.trim()
+}
+
+Recorder.addEventHandler(
+  'mouseMove','mousemove', function(event) {
+    addMouseoverQ(event)
+  }
+)
+
 // © Shuo-Heng Shih, SideeX Team
 Recorder.addEventHandler(
   'dragAndDrop',
   'mousedown',
   function(event) {
-    mousedown = undefined
-    selectMousedown = undefined
-    if (
-      event.clientX < window.document.documentElement.clientWidth &&
-      event.clientY < window.document.documentElement.clientHeight
-    ) {
-      mousedown = event
-      mouseup = setTimeout(() => {
-        mousedown = undefined
-      }, 200)
-
-      selectMouseup = setTimeout(() => {
-        selectMousedown = event
-      }, 200)
-    }
-    mouseoverQ = []
+    resetMouseoverQ()
+    addMouseoverQ(event)
 
     if (event.target.nodeName) {
       let tagName = event.target.nodeName.toLowerCase()
@@ -334,120 +386,29 @@ Recorder.addEventHandler(
   'dragAndDrop',
   'mouseup',
   function(event) {
-    function getSelectionText() {
-      let text = ''
-      let activeEl = window.document.activeElement
-      let activeElTagName = activeEl ? activeEl.tagName.toLowerCase() : null
-      if (activeElTagName == 'textarea' || activeElTagName == 'input') {
-        text = activeEl.value.slice(
-          activeEl.selectionStart,
-          activeEl.selectionEnd
-        )
-      } else if (window.getSelection) {
-        text = window.getSelection().toString()
-      }
-      return text.trim()
-    }
-    clearTimeout(selectMouseup)
-    if (selectMousedown) {
-      let x = event.clientX - selectMousedown.clientX
-      let y = event.clientY - selectMousedown.clientY
-
-      if (
-        selectMousedown &&
-        event.button === 0 &&
-        x + y &&
-        (event.clientX < window.document.documentElement.clientWidth &&
-          event.clientY < window.document.documentElement.clientHeight) &&
-        getSelectionText() === ''
-      ) {
-        let sourceRelateX =
-          selectMousedown.pageX -
-          selectMousedown.target.getBoundingClientRect().left -
-          window.scrollX
-        let sourceRelateY =
-          selectMousedown.pageY -
-          selectMousedown.target.getBoundingClientRect().top -
-          window.scrollY
-        let targetRelateX, targetRelateY
-        if (
-          !!mouseoverQ.length &&
-          mouseoverQ[1].relatedTarget == mouseoverQ[0].target &&
-          mouseoverQ[0].target == event.target
-        ) {
-          targetRelateX =
-            event.pageX -
-            mouseoverQ[1].target.getBoundingClientRect().left -
-            window.scrollX
-          targetRelateY =
-            event.pageY -
-            mouseoverQ[1].target.getBoundingClientRect().top -
-            window.scrollY
-          record(
-            'mouseDownAt',
-            locatorBuilders.buildAll(selectMousedown.target),
-            sourceRelateX + ',' + sourceRelateY
-          )
-          record(
-            'mouseMoveAt',
-            locatorBuilders.buildAll(mouseoverQ[1].target),
-            targetRelateX + ',' + targetRelateY
-          )
-          record(
-            'mouseUpAt',
-            locatorBuilders.buildAll(mouseoverQ[1].target),
-            targetRelateX + ',' + targetRelateY
-          )
-        } else {
-          targetRelateX =
-            event.pageX -
-            event.target.getBoundingClientRect().left -
-            window.scrollX
-          targetRelateY =
-            event.pageY -
-            event.target.getBoundingClientRect().top -
-            window.scrollY
-          record(
-            'mouseDownAt',
-            locatorBuilders.buildAll(event.target),
-            targetRelateX + ',' + targetRelateY
-          )
-          record(
-            'mouseMoveAt',
-            locatorBuilders.buildAll(event.target),
-            targetRelateX + ',' + targetRelateY
-          )
-          record(
-            'mouseUpAt',
-            locatorBuilders.buildAll(event.target),
-            targetRelateX + ',' + targetRelateY
-          )
+    addMouseoverQ(event)
+    if(1<mouseoverQ.length) {
+      const first = mouseoverQ[0]
+      const last = mouseoverQ[mouseoverQ.length-1]
+      const time = last[1] - first[1]
+      if(200 < time) {
+        skipClick.call(this)
+        if (last[0].button === 0 && getSelectionText() === '') {
+          if(event.altKey) {
+            mouseoverQ.filter(q => -1<['mousedown','mouseup','mousemove'].indexOf(q[0].type)).forEach(q => {
+              const cmd = `mouse${q[0].type.charAt(5).toUpperCase()}${q[0].type.substring(6)}At`
+              record(cmd, locatorBuilders.buildAll(q[0].target), q[2].join(','))
+            })
+          } else if(first[0].target !== last[0].target) {
+            mouseoverQ.filter(q => q[0].type != 'mousemove').forEach(q => {
+              const cmd = `mouse${q[0].type.charAt(5).toUpperCase()}${q[0].type.substring(6)}`
+              record(cmd, locatorBuilders.buildAll(q[0].target), '')
+            })
+          }
         }
       }
-    } else {
-      clickLocator = undefined
-      mouseup = undefined
-      let x = 0
-      let y = 0
-      if (mousedown) {
-        x = event.clientX - mousedown.clientX
-        y = event.clientY - mousedown.clientY
-      }
-
-      if (mousedown && mousedown.target !== event.target && !(x + y)) {
-        record('mouseDown', locatorBuilders.buildAll(mousedown.target), '')
-        record('mouseUp', locatorBuilders.buildAll(event.target), '')
-      } else if (mousedown && mousedown.target === event.target) {
-        let target = locatorBuilders.buildAll(mousedown.target)
-        // setTimeout(function() {
-        //     if (!self.clickLocator)
-        //         record("click", target, '');
-        // }.bind(this), 100);
-      }
     }
-    mousedown = undefined
-    selectMousedown = undefined
-    mouseoverQ = undefined
+    resetMouseoverQ()
   },
   true
 )
@@ -486,7 +447,6 @@ Recorder.addEventHandler(
       )
     }
     dragstartLocator = undefined
-    selectMousedown = undefined
   },
   true
 )
@@ -532,12 +492,7 @@ Recorder.addEventHandler(
           nodeInsertedAttrChange = undefined
         }, 500)
       }
-      //drop target overlapping
-      if (mouseoverQ) {
-        //mouse keep down
-        if (mouseoverQ.length >= 3) mouseoverQ.shift()
-        mouseoverQ.push(event)
-      }
+      addMouseoverQ(event)
     }
   },
   true
@@ -550,6 +505,7 @@ Recorder.addEventHandler(
   'mouseOut',
   'mouseout',
   function(event) {
+    addMouseoverQ(event)
     if (mouseoutLocator !== null && event.target === mouseoutLocator) {
       record('mouseOut', locatorBuilders.buildAll(event.target), '')
     }
@@ -828,7 +784,7 @@ Recorder.addEventHandler('select', 'change', function(event) {
                 value
               )
             }
-            this.recordingState.preventClickTwice = true
+            skipClick.call(this)
             options[i]._wasSelected = options[i].selected
           }
         }
