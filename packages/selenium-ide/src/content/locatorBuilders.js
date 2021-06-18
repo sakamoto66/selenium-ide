@@ -51,12 +51,13 @@ LocatorBuilders.prototype.build = function(e) {
   }
 }
 
-LocatorBuilders.prototype.buildAll = function(el) {
+LocatorBuilders.prototype.buildAll = function(el, assertCommand) {
   let e = core.firefox.unwrap(el) //Samit: Fix: Do the magic to get it to work in Firefox 4
   let locator
   let locators = []
-  for (let i = 0; i < LocatorBuilders.order.length; i++) {
-    let finderName = LocatorBuilders.order[i]
+  const order = LocatorBuilders.getAutoPreferredOrder(el, assertCommand);
+  for (let i = 0; i < order.length; i++) {
+    let finderName = order[i]
     try {
       locator = this.buildWith(finderName, e)
       if (locator) {
@@ -88,6 +89,33 @@ LocatorBuilders.prototype.findElement = function(loc) {
     //this.log.debug("findElement failed: " + error + ", locator=" + locator);
     return null
   }
+}
+
+LocatorBuilders.prototype.findElements = function(loc) {
+  try {
+    const locator = parse_locator(loc, true)
+    return bot.locators.findElements(
+      { [locator.type]: locator.string },
+      this.window.document
+    )
+  } catch (error) {
+    //this.log.debug("findElement failed: " + error + ", locator=" + locator);
+    return null
+  }
+}
+
+LocatorBuilders.prototype.createXpathInnerText = function(el) {
+  if (!el.innerText) {
+    return null
+  }
+  const text1 = el.innerText
+  const text2 = text1.replace(/(^\s+|\s+$)/g, '');
+  if (0 == text2.length) {
+    return null
+  }
+  const tagname = el.nodeName.toLowerCase()
+  const text = this.attributeValue(text2);
+  return text1 == text2 ? `${tagname}[.=${text}]` : `${tagname}[contains(.,${text})]`
 }
 
 /*
@@ -137,6 +165,49 @@ LocatorBuilders.setPreferredOrder = function(preferredOrder) {
  */
 LocatorBuilders.getPreferredOrder = function() {
   return this._preferredOrder
+}
+
+LocatorBuilders.getAutoPreferredOrder = function(e, assertCommand) {
+  console.log("XPathResult.ORDERED_NODE_SNAPSHOT_TYPE",XPathResult.UNORDERED_NODE_ITERATOR_TYPE)
+  const order = ['css:data-attr'];
+  switch(e.nodeName) {
+    case 'IMG':
+      order.push('xpath:img')
+      break;
+    case 'INPUT': case 'TEXTAREA': case 'SELECT':
+      if (assertCommand && !assertCommand.includes('Value')) {
+        order.push('xpath:form-value')
+      }
+      order.push('xpath:form-image')
+      order.push('xpath:form-item')
+      order.push('xpath:attributes')
+      break;
+    case 'OPTION':
+      order.push('xpath:form-select-option')
+      break;
+  }
+  if (assertCommand && !assertCommand.includes('Text')) {
+    order.push('xpath:innerText')
+  }
+  order.push('css:finder')
+  for (let i = 0; i < LocatorBuilders.order.length; i++) {
+    let finderName = LocatorBuilders.order[i]
+    if( -1 == order.indexOf(finderName)) {
+      order.push(finderName);
+    }
+  }
+  return order;
+}
+
+LocatorBuilders._findParent = function(el, func) {
+  let parent = el;
+  while(parent != null) {
+    if(func(parent)) {
+      return parent
+    }
+    parent = parent.parentNode
+  }
+  return null
 }
 
 /**
@@ -263,6 +334,15 @@ LocatorBuilders.prototype.preciseXPath = function(xpath, e) {
   return 'xpath=' + xpath
 }
 
+LocatorBuilders.prototype.preciseXPathNoHead = function(xpath, e) {
+  const els = this.findElements('xpath='+xpath)
+  switch(els.length) {
+    case 0:return [0, null]
+    case 1:return [1, xpath]
+  }
+  return [els.length, `(${xpath})[${els.indexOf(e)+1}]`]
+}
+
 /*
  * ===== builders =====
  */
@@ -275,16 +355,9 @@ LocatorBuilders.add('css:data-attr', function cssDataAttr(e) {
   for (let i = 0; i < dataAttributes.length; i++) {
     const attr = dataAttributes[i]
     const value = e.getAttribute(attr)
-    if (attr) {
+    if (value != null && value != '') {
       return `css=*[${attr}="${value}"]`
     }
-  }
-  return null
-})
-
-LocatorBuilders.add('id', function id(e) {
-  if (e.id) {
-    return 'id=' + e.id
   }
   return null
 })
@@ -365,12 +438,12 @@ LocatorBuilders.add('xpath:img', function xpathImg(e) {
 
 LocatorBuilders.add('xpath:attributes', function xpathAttr(e) {
   const PREFERRED_ATTRIBUTES = [
-    'id',
     'name',
     'value',
     'type',
     'action',
     'onclick',
+    'id',
   ]
   let i = 0
 
@@ -494,9 +567,115 @@ LocatorBuilders.add('xpath:position', function xpathPosition(
 })
 
 LocatorBuilders.add('xpath:innerText', function xpathInnerText(el) {
-  if (el.innerText) {
-    return `xpath=//${el.nodeName.toLowerCase()}[contains(.,'${el.innerText}')]`
-  } else {
+  const locator = this.createXpathInnerText(el)
+  if (!locator) {
+    return null
+  }  
+  return this.preciseXPathNoHead('//'+locator)[1]
+})
+
+LocatorBuilders.add('xpath:form-value', function cssFormItem(el) {
+  if (-1 == ['INPUT'].indexOf(el.nodeName)) {
+    return null;
+  }
+  const type = el.getAttribute('type').toLowerCase()
+  if (-1 == ['button','submit','reset','checkbox','radio'].indexOf(type)) {
+    return null;
+  }
+
+  const form = LocatorBuilders._findParent(el, function(e){
+    return -1 < ['FORM'].indexOf(e.nodeName)
+  })
+
+  let prefix = ''
+  if(form){
+    const forms = this.preciseXPathNoHead('//form', el)[1]
+    if(1<forms[0]) prefix = forms[1]
+  }
+
+  const tagname = el.nodeName.toLowerCase()
+  const name = this.attributeValue(el.getAttribute('name'))
+  const value = this.attributeValue(el.getAttribute('value'))
+
+  return 'xpath='+this.preciseXPathNoHead(`${prefix}//${tagname}[@name=${name}][@value=${value}]`, el)[1]
+})
+
+LocatorBuilders.add('xpath:form-image', function cssFormItem(el) {
+  if (-1 == ['INPUT'].indexOf(el.nodeName)) {
+    return null;
+  }
+  const type = el.getAttribute('type').toLowerCase()
+  if (-1 == ['image'].indexOf(type)) {
+    return null;
+  }
+
+  const form = LocatorBuilders._findParent(el, function(e){
+    return -1 < ['FORM'].indexOf(e.nodeName)
+  })
+
+  let prefix = ''
+  if(form){
+    const forms = this.preciseXPathNoHead('//form', el)[1]
+    if(1<forms[0]) prefix = forms[1]
+  }
+
+  const tagname = el.nodeName.toLowerCase()
+  const name = this.attributeValue(el.getAttribute('name'))
+  const src = this.attributeValue(el.getAttribute('src'))
+
+  return 'xpath='+this.preciseXPathNoHead(`${prefix}//${tagname}[@name=${name}][@src=${src}]`, el)[1]
+})
+
+LocatorBuilders.add('xpath:form-item', function cssFormItem(el) {
+  if (-1 == ['INPUT','TEXTAREA','SELECT'].indexOf(el.nodeName)) {
+    return null;
+  }
+
+  const form = LocatorBuilders._findParent(el, function(e){
+    return -1 < ['FORM'].indexOf(e.nodeName)
+  })
+
+  let prefix = ''
+  if(form){
+    const forms = this.preciseXPathNoHead('//form', el)[1]
+    if(1<forms[0]) prefix = forms[1]
+  }
+
+  const tagname = el.nodeName.toLowerCase()
+  const name = this.attributeValue(el.getAttribute('name'))
+
+  return 'xpath='+this.preciseXPathNoHead(`${prefix}//${tagname}[@name=${name}]`, el)[1]
+})
+
+LocatorBuilders.add('xpath:form-select-option', function cssFormItem(el) {
+  if (-1 == ['OPTION'].indexOf(el.nodeName)) {
+    return null;
+  }
+
+  const form = LocatorBuilders._findParent(el, function(e){
+    return -1 < ['FORM'].indexOf(e.nodeName)
+  })
+
+  let prefix = ''
+  if(form){
+    const forms = this.preciseXPathNoHead('//form', el)[1]
+    if(1<forms[0]) prefix = forms[1]
+  }
+
+  const selectel = LocatorBuilders._findParent(el, function(e){
+    return -1 < ['SELECT'].indexOf(e.nodeName)
+  })
+  if(!selectel){
     return null
   }
+  
+  const name = this.attributeValue(selectel.getAttribute('name'))
+  return 'xpath='+this.preciseXPathNoHead(`${prefix}//select[@name=${name}]/${this.createXpathInnerText(el)}`, el)[1]
+})
+
+LocatorBuilders.add('id', function id(e) {
+  if (e.id) {
+    return 'id=' + e.id
+  }
+  return null
 })
