@@ -58,7 +58,7 @@ export default class ProjectHeader extends React.Component {
     return (
       <div className={classNames('header', { changed: this.props.changed })}>
         <Title
-          title={`Selenium IDE ${this.props.title === '' ? '' : '-'} ${
+          title={`Selenium IDE Custom ${this.props.title === '' ? '' : '-'} ${
             this.props.title
           }${this.props.changed ? '*' : ''}`}
         />
