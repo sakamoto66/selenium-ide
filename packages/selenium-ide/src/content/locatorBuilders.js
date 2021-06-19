@@ -168,7 +168,6 @@ LocatorBuilders.getPreferredOrder = function() {
 }
 
 LocatorBuilders.getAutoPreferredOrder = function(e, assertCommand) {
-  console.log("XPathResult.ORDERED_NODE_SNAPSHOT_TYPE",XPathResult.UNORDERED_NODE_ITERATOR_TYPE)
   const order = ['css:data-attr'];
   switch(e.nodeName) {
     case 'IMG':
