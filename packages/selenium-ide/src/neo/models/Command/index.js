@@ -193,7 +193,6 @@ export default class Command {
 
   export() {
     let exported = {
-      id: this.id,
       comment: this.comment,
       command: this.command,
       target: this.target,
@@ -211,7 +210,7 @@ export default class Command {
   }
 
   static fromJS = function(jsRep) {
-    const command = new Command(jsRep.id)
+    const command = new Command()
     command.setData(jsRep)
     return command
   }

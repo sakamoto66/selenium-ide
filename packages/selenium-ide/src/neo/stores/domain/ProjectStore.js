@@ -242,7 +242,6 @@ export default class ProjectStore {
 
   toJS() {
     return toJS({
-      id: this.id,
       version: this.version,
       name: this.name,
       url: this.url,

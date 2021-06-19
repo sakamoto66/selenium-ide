@@ -164,7 +164,6 @@ export default class Suite {
 
   export() {
     return {
-      id: this.id,
       name: this.name,
       persistSession: this.persistSession,
       parallel: this.isParallel,
@@ -175,7 +174,7 @@ export default class Suite {
 
   @action
   static fromJS = function(jsRep, projectTests) {
-    const suite = new Suite(jsRep.id)
+    const suite = new Suite()
     suite.setName(jsRep.name)
     suite.setTimeout(jsRep.timeout)
     suite.setParallel(jsRep.parallel)
