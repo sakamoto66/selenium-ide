@@ -17,6 +17,7 @@
 
 import browser from 'webextension-polyfill'
 import { calculateFrameIndex } from './utils'
+import LocatorBuilders from './locatorBuilders'
 
 let contentSideexTabId = -1
 let frameLocation = ''
@@ -172,77 +173,207 @@ const recorder = new Recorder(window)
 // recorder event handlers
 browser.runtime.onMessage.addListener(attachRecorderHandler)
 browser.runtime.onMessage.addListener(detachRecorderHandler)
-
+ 
 function addRecordingIndicator() {
-  if (frameLocation === 'root' && !recordingIndicator) {
-    const indicatorIndex = window.parent.frames.length
-    recordingIndicator = window.document.createElement('iframe')
-    recordingIndicator.src = browser.runtime.getURL('/indicator.html')
-    recordingIndicator.id = 'selenium-ide-indicator'
-    recordingIndicator.style.border = '1px solid #d30100'
-    recordingIndicator.style.borderRadius = '50px'
-    recordingIndicator.style.position = 'fixed'
-    recordingIndicator.style.bottom = '36px'
-    recordingIndicator.style.right = '36px'
-    recordingIndicator.style.width = '400px'
-    recordingIndicator.style.height = '50px'
-    recordingIndicator.style['background-color'] = '#f7f7f7'
-    recordingIndicator.style['box-shadow'] = '0 7px 10px 0 rgba(0,0,0,0.1)'
-    recordingIndicator.style.transition = 'bottom 100ms linear'
-    recordingIndicator.style['z-index'] = 1000000000000000
-    recordingIndicator.addEventListener(
-      'mouseenter',
-      function(event) {
-        event.target.style.visibility = 'hidden'
-        setTimeout(function() {
-          event.target.style.visibility = 'visible'
-        }, 1000)
-      },
-      false
-    )
-    window.document.body.appendChild(recordingIndicator)
-    browser.runtime.onMessage.addListener(function(
-      message,
-      sender, // eslint-disable-line
-      sendResponse
-    ) {
-      if (message.recordNotification) {
-        recordingIndicator.contentWindow.postMessage(
-          {
-            direction: 'from-recording-module',
-            command: message.command,
-            target: message.target,
-            value: message.value,
-          },
-          '*'
-        )
-        recordingIndicator.style.borderColor = 'black'
-        setTimeout(() => {
-          recordingIndicator.style.borderColor = '#d30100'
-        }, 1000)
-        sendResponse(true)
-      }
-    })
-    return browser.runtime
-      .sendMessage({
-        setFrameNumberForTab: true,
-        indicatorIndex: indicatorIndex,
-      })
-      .catch(() => {})
+  if (frameLocation !== 'root' || recordingIndicator) return
+  for(let ename in recordingIndicatorHandles) {
+    window.document.addEventListener(ename, recordingIndicatorHandles[ename], false)
   }
+  const style = `
+  #root {
+    position: fixed;
+    bottom: 36px;
+    right: 36px;
+    width: 400px;
+    height: 250px;
+    border: 1px solid #d30100;
+    border-radius: 10px;
+    background-color: #f7f7f7;
+    box-shadow: 0 7px 10px 0 rgba(0,0,0,0.1);
+    z-index:1000000000000000;
+    transition:bottom 100ms linear;
+    font-family: system, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 13px;
+    overflow:hidden;
+    padding:5px;
+  }
+  #root.hidden {
+    display: none;
+  }
+
+  #root.recorded {
+    animation: recorded 1s step-end;
+  }
+  #root.recorded #content {
+    display:none;
+  }
+  #root.recorded #content2 {
+    display:block;
+  }
+  #root.recorded #circle {
+    visibility: hidden;
+  }
+
+  @keyframes recorded {
+    from {
+      border-color:#000000;
+    }
+    to {
+      border-color:#d30100;
+    }
+  }
+
+  #root.record {
+    border-color:black;
+  }
+  #root > div {
+    display: flex;
+    padding: 5px;
+  }
+  
+  #circle {
+    height: 10px;
+    width: 10px;
+    background: #E80600;
+    border-radius: 50%;
+    margin: 0 10px;
+    animation: fadeIn 1s infinite alternate;
+    visibility: visible;
+  }
+  
+  #content {
+    display:block;
+    color: #E80600;
+    text-align: center;
+  }
+  #content2 {
+    display:none;
+    color: #114990;
+    text-align: center;
+  }
+  #targets {
+    font-size:0.8rem;
+    line-height:1.8em;
+    width:100%;
+    height:10rem;
+  }
+  div.notice {
+    font-size:1rem;
+  }
+  
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+  }
+  div.message {
+    font-size: 1.5rem;
+    display: flex;
+    align-items:center;
+    flex-direction: row;
+  }
+  #ide-img {
+    width: 28px;
+  }
+  div.line {
+    height: 28px;
+    border-left: 1px solid #c6c6c6;
+  }`
+  const body = `
+  <div class="message" aria-live="assertive">
+      <img id="ide-img" src="${(window.chrome ? chrome : browser).runtime.getURL('/icons/icon_light128.png')}"/>
+      <div class="line"></div>
+      <div id="circle"></div>
+      <span id="content" aria-label="Selenium IDE is recording..." role="alert">Selenium IDE is recording...</span>
+      <span id="content2"></span>
+  </div>
+  <div>
+    <textarea id="targets" readonly></textarea>
+  </div>
+  <div>
+    <div class="notice">[shift + mouseover] show locator</div>
+  </div>
+  `
+  recordingIndicator = window.document.createElement('selenium-ide-indicator')
+  recordingIndicator.style.position = 'fixed'
+  recordingIndicator.style.left = '-1px'
+  recordingIndicator.style.top = '-1px'
+  recordingIndicator.style.width = '1px'
+  recordingIndicator.style.height = '1px'
+  window.document.body.appendChild(recordingIndicator)
+
+  //
+  const shadow = recordingIndicator.attachShadow({mode: 'open'});
+  const styletag = document.createElement('style');
+  styletag.innerHTML = style
+  const bodytag = document.createElement('div');
+  bodytag.id = 'root'
+  bodytag.innerHTML = body
+  shadow.appendChild(styletag);
+  shadow.appendChild(bodytag);
+
+  setTimeout( () => {recordingIndicator.rect = bodytag.getBoundingClientRect()},0)
+}
+
+function removeRecordingIndicator() {
+  if (frameLocation !== 'root' || !recordingIndicator) return
+  for(let ename in recordingIndicatorHandles) {
+    window.document.removeEventListener(ename, recordingIndicatorHandles[ename], false)
+  }
+  recordingIndicator.parentElement.removeChild(recordingIndicator)
+  recordingIndicator = undefined
+}
+
+function onMessageForRecordingIndicator(message, sender, sendResponse) {
+  if (!recordingIndicator || !message.recordNotification) return
+  showRecordingIndicator(recordingIndicator.shadowRoot, message)
+  sendResponse(true)
+}
+browser.runtime.onMessage.addListener(onMessageForRecordingIndicator)
+
+function showRecordingIndicator(doc, message) {
+  const root = doc.getElementById('root')
+  const content = doc.getElementById('content2')
+  const targets = doc.getElementById('targets')
+  if(message.command) {
+    clearTimeout(showRecordingIndicator.timer);
+    content.innerText = 'Recorded ' + message.command
+    root.className = "recorded"
+    showRecordingIndicator.timer = setTimeout(function(){root.className = ""},1000)
+  }
+  targets.value = message.target.map( t => t[0]).join("\n")
+}
+showRecordingIndicator.timer = null;
+
+let recordingIndicatorLastShiftKeyTime = 0
+const recordingIndicatorHandles = {}
+recordingIndicatorHandles['mouseover'] = function(event) {
+  if(!recordingIndicator || !event.shiftKey)return
+  recordingIndicatorLastShiftKeyTime = (new Date()).getTime()
+  let p = event.target
+  while(p){
+    if(p===recordingIndicator) return
+    p = p.parentElement
+  }
+  showRecordingIndicator(recordingIndicator.shadowRoot, {
+    target: locatorBuilders.buildAll(event.target),
+  })
+}
+
+recordingIndicatorHandles['mousemove'] = function(event) {
+  if(!recordingIndicator)return
+  const r = recordingIndicator.rect
+  const x = event.clientX, y = event.clientY
+  const root = recordingIndicator.shadowRoot.getElementById("root")
+  const delaytime = recordingIndicatorLastShiftKeyTime > (new Date()).getTime() - 5000
+  const intoarea = r.left <= x && x <= r.right && r.top <= y && y <= r.bottom
+  root.className = (delaytime || !intoarea) ? '' : 'hidden'
 }
 
 function getFrameCount() {
   return browser.runtime.sendMessage({
     requestFrameCount: true,
   })
-}
-
-function removeRecordingIndicator() {
-  if (frameLocation === 'root' && recordingIndicator) {
-    recordingIndicator.parentElement.removeChild(recordingIndicator)
-    recordingIndicator = undefined
-  }
 }
 
 // set frame id
@@ -288,10 +419,6 @@ async function getFrameLocation() {
 function recalculateFrameLocation(message, _sender, sendResponse) {
   if (message.recalculateFrameLocation) {
     ;(async () => {
-      removeRecordingIndicator()
-      setTimeout(async () => {
-        await addRecordingIndicator()
-      }, 100)
       frameLocation = ''
       await getFrameLocation()
       sendResponse(true)
@@ -320,6 +447,7 @@ export function record(
   insertBeforeLastCommand,
   actualFrameLocation
 ) {
+  if(target.find( t => 'css=selenium-ide-indicator'== t[0])) return
   browser.runtime
     .sendMessage({
       command: command,
