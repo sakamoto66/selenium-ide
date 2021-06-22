@@ -59,11 +59,20 @@ Recorder.addEventHandler('type', 'change', function(event) {
     let type = event.target.type
     if ('input' == tagName && Recorder.inputTypes.indexOf(type) >= 0) {
       if (event.target.value.length > 0) {
-        record(
-          'type',
-          locatorBuilders.buildAll(event.target),
-          event.target.value
-        )
+        if('file' == type && 1 < event.target.files.length) {
+          const basedir = event.target.value.replace(/[^\\/]+$/, '')
+          record(
+            'type',
+            locatorBuilders.buildAll(event.target),
+            [...event.target.files].map(f=>basedir+f.name).join(',')
+          )
+        } else {
+          record(
+            'type',
+            locatorBuilders.buildAll(event.target),
+            event.target.value
+          )
+        }
 
         // © Chen-Chieh Ping, SideeX Team
         if (this.recordingState.enterTarget != null) {
